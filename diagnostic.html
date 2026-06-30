@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GeoJourney 診断＆完全修復ツール</title>
+<!-- 診断画面用のシンプルで分かりやすいダークスタイル -->
+<style>
+body {
+font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+background-color: #090b11;
+color: #f8f9fa;
+padding: 24px;
+margin: 0;
+}
+.container {
+max-width: 600px;
+margin: 0 auto;
+}
+h1 {
+font-size: 20px;
+font-weight: 800;
+border-bottom: 2px solid #007aff;
+padding-bottom: 10px;
+margin-bottom: 20px;
+color: #007aff;
+display: flex;
+align-items: center;
+gap: 10px;
+}
+.card {
+background-color: #121622;
+border: 1px solid rgba(255,255,255,0.08);
+border-radius: 16px;
+padding: 20px;
+margin-bottom: 16px;
+box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.card h2 {
+font-size: 15px;
+margin-top: 0;
+margin-bottom: 12px;
+color: #8e929e;
+text-transform: uppercase;
+letter-spacing: 0.5px;
+}
+.test-row {
+display: flex;
+justify-content: space-between;
+align-items: center;
+padding: 12px 0;
+border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.test-row:last-child {
+border-bottom: none;
+}
+.test-name {
+font-weight: bold;
+font-size: 14px;
+}
+.status {
+font-size: 12px;
+font-weight: bold;
+padding: 4px 10px;
+border-radius: 12px;
+background-color: #21262d;
+}
+.status.ok {
+background-color: rgba(0, 255, 194, 0.15);
+color: #00ffc2;
+}
+.status.error {
+background-color: rgba(255, 59, 48, 0.15);
+color: #ff3b30;
+}
+.status.warning {
+background-color: rgba(255, 215, 0, 0.15);
+color: #ffd700;
+}
+.log-box {
+background-color: #0d1117;
+border: 1px solid rgba(255,255,255,0.05);
+border-radius: 8px;
+padding: 12px;
+font-family: monospace;
+font-size: 11px;
+color: #8e929e;
+max-height: 150px;
+overflow-y: auto;
+white-space: pre-wrap;
+word-break: break-all;
+}
+.btn {
+background-color: #007aff;
+color: white;
+border: none;
+padding: 14px;
+border-radius: 12px;
+font-weight: bold;
+width: 100%;
+cursor: pointer;
+font-size: 14px;
+margin-bottom: 10px;
+display: flex;
+justify-content: center;
+align-items: center;
+gap: 8px;
+}
+.btn:active {
+opacity: 0.8;
+transform: scale(0.98);
+}
+.btn-danger {
+background-color: #ff3b30;
+}
+.btn-secondary {
+background-color: #21262d;
+border: 1px solid rgba(255,255,255,0.08);
+color: #f8f9fa;
+}
+/* テストマップ枠 */
+#test-map {
+width: 100%;
+height: 150px;
+border-radius: 8px;
+margin-top: 10px;
+background: #0d1117;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🛠️ GeoJourney 環境診断＆修復</h1>
+<!-- カード1: ステータス診断 -->
+<div class="card">
+<h2>🔍 ブラウザ＆ファイル環境チェック</h2>
+<div class="test-row">
+<span class="test-name">1. 地図ライブラリ (Leaflet)</span>
+<span class="status" id="status-leaflet">チェック中...</span>
+</div>
+<div class="test-row">
+<span class="test-name">2. 全国市区町村データ (Nihon.json)</span>
+<span class="status" id="status-json">チェック中...</span>
+</div>
+<div class="test-row">
+<span class="test-name">3. iPad/iOSの位置情報(GPS)の許可</span>
+<span class="status" id="status-gps">チェック中...</span>
+</div>
+<div class="test-row">
+<span class="test-name">4. クラウド同期ライブラリ</span>
+<span class="status" id="status-firebase">チェック中...</span>
+</div>
+</div>
+<!-- カード2: 詳細ログ -->
+<div class="card">
+<h2>📝 詳細診断ログ</h2>
+<div class="log-box" id="diagnostic-log">診断を開始します...\n</div>
+</div>
+<!-- カード3: 動作テスト用マップ -->
+<div class="card">
+<h2>🗺️ 簡易地図描画テスト</h2>
+<p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+ここに世界地図が表示されて、指でスライド操作できれば、iPad側の地図エンジンは100%健康です。
+</p>
+<div id="map-container">
+<div id="map"></div>
+</div>
+</div>
+<!-- カード4: 修復アクション -->
+<div class="card">
+<h2>⚡ ワンタップ修復アクション</h2>
+<button class="btn btn-danger" onclick="forceClearCacheAndData()">
+🗑️ キャッシュと一時データを強制クリア（修復）
+</button>
+<button class="btn" onclick="runDiagnostics()">
+🔄 再度診断を実行する
+</button>
+<a class="btn btn-secondary" style="text-decoration: none;" href="./index.html">
+🚀 アプリケーションに戻る
+</a>
+</div>
+</div>
+<!-- 診断用ロジック -->
+<script>
+function log(message) {
+const logBox = document.getElementById('diagnostic-log');
+if (logBox) {
+logBox.innerText += message + "\n";
+logBox.scrollTop = logBox.scrollHeight;
+}
+}
+async function runDiagnostics() {
+document.getElementById('diagnostic-log').innerText = "診断テストを開始します...\n";
+log(⁠ブラウザ情報: ${navigator.userAgent}⁠);
+// --- 1. Leaflet (L) チェック ---
+const leafletBadge = document.getElementById('status-leaflet');
+if (typeof L !== 'undefined') {
+leafletBadge.className = "status ok";
+leafletBadge.innerText = "正常に稼働";
+log("Leaflet 地図ライブラリは正常にロードされています。バージョン: " + L.version);
+// 地図の再構築テスト
+try {
+const testMapDiv = document.getElementById('map');
+testMapDiv.innerHTML = ""; // 初期化
+const m = L.map('map', {zoomControl: false}).setView([35.6895, 139.6917], 11);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(m);
+L.marker([35.6895, 139.6917]).addTo(m);
+log("簡易地図描画テストの初期化に成功しました。");
+} catch(mapErr) {
+log("簡易地図描画テストに失敗: " + mapErr.message);
+}
+} else {
+leafletBadge.className = "status error";
+leafletBadge.innerText = "ロード失敗";
+log("Leafletライブラリの読み込みに失敗しています。CDNへの接続かネットワーク設定に問題があります。");
+}
+// --- 2. Nihon.json チェック ---
+const jsonBadge = document.getElementById('status-json');
+try {
+log("Nihon.json をフェッチしています...");
+const res = await fetch('./Nihon.json');
+if (!res.ok) {
+throw new Error(⁠ファイルをサーバーから取得できませんでした。HTTPエラーコード: ${res.status}⁠);
+}
+const text = await res.text();
+log(⁠Nihon.json の読み込みサイズ: ${text.length} バイト⁠);
+const data = JSON.parse(text);
+let prefCount = 0;
+if (Array.isArray(data) && data.length > 0) {
+prefCount = Object.keys(data[0]).length;
+} else if (data && typeof data === 'object') {
+prefCount = Object.keys(data).length;
+}
+jsonBadge.className = "status ok";
+jsonBadge.innerText = ⁠OK (${prefCount}都道府県検出)⁠;
+log(⁠Nihon.json の解析（パース）に成功。格納されている都道府県キーの数: ${prefCount}⁠);
+} catch (err) {
+jsonBadge.className = "status error";
+jsonBadge.innerText = "破損または不在";
+log(⁠Nihon.json テスト失敗: ${err.message}⁠);
+log("【対策】GitHubに『Nihon.json』という名前で正しい形式のJSONデータが保存されているか、確認してください。");
+}
+// --- 3. GPS許可チェック ---
+const gpsBadge = document.getElementById('status-gps');
+if (navigator.geolocation) {
+navigator.geolocation.getCurrentPosition(
+(pos) => {
+gpsBadge.className = "status ok";
+gpsBadge.innerText = "許可・取得成功";
+log(⁠GPSチェック成功。現在地: 緯度 ${pos.coords.latitude.toFixed(4)}, 経度 ${pos.coords.longitude.toFixed(4)}⁠);
+},
+(err) => {
+gpsBadge.className = "status warning";
+gpsBadge.innerText = "不許可 (警告)";
+log(⁠GPS取得に失敗しました (コード: ${err.code})。iPadの「設定」->「プライバシーとセキュリティ」->「位置情報サービス」でブラウザ（Safari）のGPS利用が許可されているか確認してください。⁠);
+},
+{ timeout: 5000 }
+);
+} else {
+gpsBadge.className = "status error";
+gpsBadge.innerText = "非対応デバイス";
+log("このブラウザはGPS（位置情報サービス）に対応していません。");
+}
+// --- 4. Firebase/Cloud 同期チェック ---
+const fbBadge = document.getElementById('status-firebase');
+if (window.firebaseDocs || typeof initializeApp !== 'undefined') {
+fbBadge.className = "status ok";
+fbBadge.innerText = "正常";
+log("Firebase SDK ライブラリはブラウザに読み込まれています。");
+} else {
+fbBadge.className = "status warning";
+fbBadge.innerText = "未ロード";
+log("Firebaseはロードされていませんが、オフライン(セーフモード)としてアプリが動く設定になっているため動作には問題ありません。");
+}
+}
+// 強制リセット
+function forceClearCacheAndData() {
+try {
+log("ブラウザに保存されている LocalStorage, SessionStorage の完全削除を開始...");
+localStorage.clear();
+sessionStorage.clear();
+log("一時データを完全に初期化しました。");
+// PWAの古いキャッシュ、ServiceWorkerの登録を強制解除
+if (navigator.serviceWorker) {
+navigator.serviceWorker.getRegistrations().then(function(registrations) {
+for(let registration of registrations) {
+registration.unregister();
+log("古いPWAサービスワーカーを登録解除しました。");
+}
+});
+}
+alert("キャッシュデータと一時保存データを強制リセット（修復）しました！\n再度診断を行うか、「アプリに戻る」をタップしてください。");
+runDiagnostics();
+} catch (err) {
+log("リセット中にエラー: " + err.message);
+}
+}
+// 読み込み完了後に自動実行
+setTimeout(runDiagnostics, 500);
+</script>
+</body>
+</html>
