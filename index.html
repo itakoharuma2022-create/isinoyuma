@@ -4,13 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>GeoJourney - 旅と実績のライフログWebアプリ</title>
-<!-- PWA用設定 -->
-<link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkdlb0pvdXJuZXkiLAogICJzaG9ydF9uYW1lIjogIkdlb0pvdXJuZXkiLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjMDkwQjExIiwKICAidGhlbWVfY29sb3IiOiAiIzAwN0FGRiIKIH0=">
-<!-- Leaflet.js (地図ライブラリ) -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<!-- FontAwesome (アイコン) -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
 <style>
 :root {
 --bg-dark: #090B11;
@@ -43,6 +36,84 @@ flex-direction: column;
 overflow: hidden;
 user-select: none;
 }
+/* ------------------ STARTUP / LOADING HUD (起動シーケンス表示) ------------------ /
+#startup-loader {
+position: fixed;
+top: 0;
+left: 0;
+width: 100vw;
+height: 100vh;
+background-color: var(--bg-dark);
+z-index: 99999;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+padding: 24px;
+transition: opacity 0.5s ease;
+}
+.spinner {
+width: 50px;
+height: 50px;
+border: 4px dashed var(--primary);
+border-top: 4px solid var(--accent);
+border-radius: 50%;
+animation: spin 1s linear infinite;
+margin-bottom: 24px;
+}
+@keyframes spin {
+0% { transform: rotate(0deg); }
+100% { transform: rotate(360deg); }
+}
+.load-title {
+font-size: 20px;
+font-weight: 900;
+margin-bottom: 8px;
+letter-spacing: 0.5px;
+}
+.load-status {
+font-size: 13px;
+color: var(--text-muted);
+margin-bottom: 24px;
+}
+/ アシスタントレスキューカード /
+.rescue-card {
+background-color: var(--bg-panel);
+border: 1px solid var(--border);
+border-radius: 16px;
+padding: 20px;
+width: 100%;
+max-width: 500px;
+box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+display: none; / エラー時のみ表示 */
+flex-direction: column;
+text-align: left;
+}
+.rescue-card h2 {
+font-size: 16px;
+color: #ff3b30;
+margin-bottom: 12px;
+display: flex;
+align-items: center;
+gap: 8px;
+}
+.rescue-card p {
+font-size: 13px;
+color: var(--text-muted);
+line-height: 1.5;
+margin-bottom: 16px;
+}
+.rescue-btn {
+background-color: var(--primary);
+color: white;
+border: none;
+padding: 12px;
+border-radius: 10px;
+font-weight: bold;
+cursor: pointer;
+text-align: center;
+font-size: 13px;
+}
 #app {
 flex: 1;
 display: flex;
@@ -62,7 +133,7 @@ overflow: hidden;
 display: flex;
 flex-direction: column;
 }
-/* ------------------ HOME (MAP SCREEN - iOS対応版) ------------------ */
+/* ------------------ HOME (MAP SCREEN) ------------------ /
 #map-container {
 flex: 1;
 position: relative;
@@ -80,7 +151,43 @@ width: 100%;
 height: 100%;
 z-index: 1;
 }
-/* 透明レイヤーを挟まず直接絶対配置にし、iPadでのタップ無反応バグを完全防止 */
+/ セーフモード時（地図未ロード）の代替GPS盤面 */
+#fallback-dashboard {
+position: absolute;
+top: 0;
+bottom: 0;
+left: 0;
+right: 0;
+z-index: 2;
+background: radial-gradient(circle, #161b2c 0%, #090b11 100%);
+display: none;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+padding: 24px;
+}
+.radar-ring {
+width: 180px;
+height: 180px;
+border: 2px dashed rgba(0, 255, 194, 0.3);
+border-radius: 50%;
+display: flex;
+align-items: center;
+justify-content: center;
+margin-bottom: 24px;
+position: relative;
+}
+.radar-sweep {
+position: absolute;
+width: 100%;
+height: 100%;
+border-radius: 50%;
+background: conic-gradient(from 0deg, rgba(0, 255, 194, 0.15) 0deg, transparent 90deg);
+animation: sweep 4s linear infinite;
+}
+@keyframes sweep {
+100% { transform: rotate(360deg); }
+}
 .overlay-top {
 position: absolute;
 top: 16px;
@@ -490,14 +597,43 @@ transform: translateX(-50%) translateY(0);
 </style>
 </head>
 <body>
+<!-- 1. 超高機能・ノンブロッキング型起動 HUD -->
+<div id="startup-loader">
+<div class="spinner" id="startup-spinner"></div>
+<div class="load-title" id="startup-title">GeoJourney</div>
+<div class="load-status" id="startup-status">接続環境を分析しています...</div>
+<!-- 海外CDNブロック時のレスキューカード -->
+<div class="rescue-card" id="rescue-ui">
+<h2>⚠️ サーバー接続が遮断されています</h2>
+<p>
+iPadの位置情報判定や、地図サーバーへの接続に制限が掛かっています（校内/社内回線や、コンテンツフィルターの影響）。
+
+この状態でもアプリがフリーズしないよう、<strong>地図なしの「セーフモード」</strong>で起動させることが可能です。
+</p>
+<button class="rescue-btn" onclick="bypassLoaderAndStartInSafeMode()">
+🚀 簡易セーフモード（地図なし）で起動
+</button>
+</div>
+</div>
 <!-- アプリメイン画面 -->
 <div id="app">
-<!-- 1. ホーム画面 (Leaflet地図メイン) -->
+<!-- 1. ホーム画面 -->
 <div id="home-tab" class="tab-panel active">
 <div id="map-container">
-<!-- 地図本体 (iOSで高さが0に潰れるのを完全防止) -->
+<!-- 地図本体 -->
 <div id="map"></div>
-<!-- HUDレイヤーを完全に独立。タップできない問題を物理的に解決 -->
+<!-- セーフモード時用の美麗なデジタルGPS盤面（L未ロード時に表示） -->
+<div id="fallback-dashboard">
+<div class="radar-ring">
+<div class="radar-sweep"></div>
+<i class="fa-solid fa-satellite" style="font-size: 40px; color: var(--accent);"></i>
+</div>
+<div style="font-size: 16px; font-weight: 800; color: #fff; margin-bottom: 8px;">セーフコンパスモード</div>
+<div style="font-size: 12px; color: var(--text-muted); text-align:center; max-width: 250px; line-height:1.4;">
+地図接続が制限されているため、高精度な位置特定のテキスト判定が動作しています。
+</div>
+</div>
+<!-- HUDオーバーレイ -->
 <div class="overlay-top">
 <div class="stat-badge">
 <div class="left-info">
@@ -754,14 +890,11 @@ let currentMarker;
 let simInterval = null;
 let simStep = 0;
 let watchId = null;
-// 【安心・超堅牢ロード】Nihon.json の非同期バックグラウンド取得処理
-// アプリ起動を一切ブロッキング(邪魔)せず、裏側でそっと読み込みます。
+// 【ノンブロッキング非同期ロード】Nihon.json
 async function loadNihonDatabaseAsync() {
 try {
 const response = await fetch('./Nihon.json');
-if (!response.ok) {
-throw new Error(⁠Nihon.json HTTP: ${response.status}⁠);
-}
+if (!response.ok) throw new Error(⁠Nihon.json HTTP: ${response.status}⁠);
 const rawText = await response.text();
 let rawData = JSON.parse(rawText);
 if (Array.isArray(rawData) && rawData.length > 0) {
@@ -770,12 +903,11 @@ Object.assign(nihonDatabase, prefectures);
 } else if (rawData && typeof rawData === 'object') {
 Object.assign(nihonDatabase, rawData);
 }
-console.log("Successfully background loaded Nihon.json.");
-showToast("全国市町村データベースをロード完了しました！", "fa-circle-check");
+console.log("Nihon.json background loaded.");
+showToast("全国市町村マスタ同期成功！", "fa-circle-check");
 updateProfileStats();
 } catch (e) {
-console.warn("Background load of Nihon.json failed. Fallback remains active.", e);
-// 読み込めない場合は自動でエマージェンシー用茨城データを流し込み
+console.warn("Background load of Nihon.json failed. Fallback active.", e);
 Object.assign(nihonDatabase, fallbackCityDatabase);
 updateProfileStats();
 }
@@ -820,12 +952,11 @@ total += nihonDatabase[key].city.length;
 } catch (err) {
 console.error("Error in getTotalCitiesCount:", err);
 }
-return total || 4; // デフォルトは茨城県の4
+return total || 4;
 }
 // ==================== マップ＆アプリ完全起動シーケンス ====================
 function initializeApplicationMap() {
 try {
-// すでにマップが存在する場合は一度破棄して再初期化
 if (map) {
 map.remove();
 }
@@ -857,15 +988,92 @@ map.invalidateSize();
 showToast("マップシステム正常ロード完了しました！", "fa-compass");
 } catch (err) {
 console.error("Leaflet initialization fatal error:", err);
+throw err;
 }
 }
-// DOM構築後、1ミリ秒も待たずに起動します
-window.addEventListener('load', () => {
-// 1. 地図を瞬時に起動（画面フリーズを回避）
-initializeApplicationMap();
-// 2. 次に、バックグラウンドでそっとJSONをロード
-loadNihonDatabaseAsync();
+// ==================== ミラーCDN非同期・超安定化起動アシスタント ====================
+function loadScriptAsync(url, timeoutMs = 4000) {
+return new Promise((resolve, reject) => {
+const s = document.createElement('script');
+s.src = url;
+s.async = true;
+const timer = setTimeout(() => { s.onerror(); }, timeoutMs);
+s.onload = () => { clearTimeout(timer); resolve(); };
+s.onerror = () => { clearTimeout(timer); reject(new Error("Timeout/Blocked: " + url)); };
+document.head.appendChild(s);
 });
+}
+function loadStyleAsync(url) {
+const l = document.createElement('link');
+l.rel = 'stylesheet';
+l.href = url;
+document.head.appendChild(l);
+}
+async function runRobustStartupSequence() {
+if (window.appStarted) return;
+const statusText = document.getElementById('startup-status');
+const spinner = document.getElementById('startup-spinner');
+const rescueUI = document.getElementById('rescue-ui');
+try {
+// 1. まずLeaflet CSSを非同期で追加
+loadStyleAsync("https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css");
+// 2. Leaflet JSをロード (超高速CDNである jsdelivr を優先ミラーに使用)
+statusText.innerText = "地図エンジンをロードしています (1/2)...";
+try {
+await loadScriptAsync("https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js");
+} catch(e) {
+// もし jsdelivr がダメなら unpkg へ自動フェイルオーバー
+statusText.innerText = "代替サーバーで接続を確立しています (1/2)...";
+await loadScriptAsync("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js");
+}
+// 3. アプリを本稼働起動
+statusText.innerText = "システムを起動しています (2/2)...";
+window.appStarted = true;
+// ローダーHUDを綺麗にフェードアウト
+const hud = document.getElementById('startup-loader');
+hud.style.opacity = '0';
+setTimeout(() => { hud.style.display = 'none'; }, 500);
+initializeApplicationMap();
+loadNihonDatabaseAsync();
+} catch (err) {
+console.error("Startup sequence failed:", err);
+// タイムアウトまたはCDNブロックが発生：フリーズを避けアシスタントレスキューを提示
+spinner.style.display = "none";
+statusText.innerText = "エラー: 地図サーバーへの接続がブロックされました。";
+rescueUI.style.display = "flex";
+}
+}
+// 強制セーフモードスキップ（タイムアウトやサーバーブロック時でも確実に起動可能）
+function bypassLoaderAndStartInSafeMode() {
+window.appStarted = true;
+// ローダーHUDの非表示
+const hud = document.getElementById('startup-loader');
+if (hud) hud.style.display = 'none';
+// 地図を隠して、美しい代わりのGPSレーダーを表示
+const mapDiv = document.getElementById('map');
+if (mapDiv) mapDiv.style.display = 'none';
+const compass = document.getElementById('fallback-dashboard');
+if (compass) compass.style.display = 'flex';
+// 仮データを入れて他のタブや機能をすべて動かす
+Object.assign(nihonDatabase, fallbackCityDatabase);
+renderBadges();
+updateProfileStats();
+showToast("セーフコンパスモードで緊急起動しました", "fa-shield-halved");
+}
+window.bypassLoaderAndStartInSafeMode = bypassLoaderAndStartInSafeMode;
+// キャッシュに邪魔されない最速フリーズ防止トリガー
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+runRobustStartupSequence();
+} else {
+window.addEventListener('DOMContentLoaded', runRobustStartupSequence);
+window.addEventListener('load', runRobustStartupSequence);
+}
+// 万が一の時も10秒経ったら自動で簡易起動させる究極のセーフガード
+setTimeout(() => {
+if (!window.appStarted) {
+bypassLoaderAndStartInSafeMode();
+}
+}, 10000);
 function switchTab(tabId) {
 document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
 document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
