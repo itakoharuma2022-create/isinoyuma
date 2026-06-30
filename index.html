@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>GeoJourney - 旅と実績のライフログWebアプリ</title>
 <!-- PWA用設定（ホーム画面追加時にアプリ化） -->
-<link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkdlb0pvdXJuZXkiLAogICJzaG9ydF9uYW1lIjogIkdlb0pvdXJuZXkiLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6OiAiIzA5MEIxMSIsCiAgInRoZW1lX2NvbG9yIjogIiMwMDdBRkYiCiB9">
+<link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkdlb0pvdXJuZXkiLAogICJzaG9ydF9uYW1lIjogIkdlb0pvdXJuZXkiLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjMDkwQjExIiwKICAidGhlbWVfY29sb3IiOiAiIzAwN0FGRiIKIH0=">
 <!-- Leaflet.js (地図ライブラリ) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -656,6 +656,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'geojourney-app-v1';
 window.user = null;
 window.db = db;
 window.appId = appId;
+// モジュール内の参照関数をグローバルに安全に紐付け（これにより、別scriptタグでの非同期エラーを完全に防止）
+window.firebaseDocs = { doc, setDoc, getDoc, collection, onSnapshot };
 const initAuth = async () => {
 try {
 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -691,16 +693,28 @@ initAuth();
 </script>
 <!-- ==================== アプリケーションコアロジック ==================== -->
 <script>
-// 日本全国都道府県・市区町村の階層化マスタ
 const nihonDatabase = {};
-// アプリケーション全体の一時保存ステート
+const fallbackCityDatabase = {
+"35.6895,139.6917": { name: "東京都新宿区", pref: "東京都" },
+"35.6640,139.6980": { name: "東京都渋谷区", pref: "東京都" },
+"35.6586,139.7454": { name: "東京都港区", pref: "東京都" },
+"35.4437,139.6380": { name: "神奈川県横浜市中区", pref: "神奈川県" },
+"35.3191,139.5467": { name: "神奈川県鎌倉市", pref: "神奈川県" },
+"35.1167,139.1500": { name: "神奈川県小田原市", pref: "神奈川県" },
+"35.0594,139.0736": { name: "静岡県熱海市", pref: "静岡県" },
+"34.9756,138.3828": { name: "静岡県静岡市", pref: "静岡県" },
+"35.9128,139.4833": { name: "埼玉県川越市", pref: "埼玉県" },
+"36.3659,140.4711": { name: "茨城県水戸市", pref: "茨城県" },
+"36.3219,140.6191": { name: "茨城県ひたちなか市", pref: "茨城県" },
+"35.9251,140.6384": { name: "茨城県鹿嶋市", pref: "茨城県" }
+};
 const appState = {
-visitedCities: new Set(), // 踏破した市町村名のセット（例: "札幌市中央区", "青森市"）
+visitedCities: new Set(),
 totalDistance: 0.0,
 activeRoute: [],
 isTracking: false,
 isSimulating: false,
-unlockedBadges: {}, // ID: 解除日時 のマップ
+unlockedBadges: {},
 selectedHistoryId: null,
 currentCategory: 'all',
 history: [],
@@ -723,12 +737,11 @@ badges: [
 { id: "badge_grand_master", category: "special", name: "グランドエクスプローラー", desc: "累計10以上の市町村を制覇する", condition: (state) => state.visitedCities.size >= 10, icon: "fa-crown", rank: "gold" }
 ]
 };
-// デモ用の仮想移動ルート（茨城県内）
 const simulationRoute = [
-[35.9251, 140.6384], // 鹿嶋市
-[35.9388, 140.5539], // 潮来市 (Nihon.json にある実在市町村)
-[36.3219, 140.6191], // ひたちなか市
-[36.3659, 140.4711], // 水戸市
+[35.9251, 140.6384],
+[35.9388, 140.5539],
+[36.3219, 140.6191],
+[36.3659, 140.4711],
 ];
 let map;
 let activePathPolyline;
@@ -737,20 +750,16 @@ let currentMarker;
 let simInterval = null;
 let simStep = 0;
 let watchId = null;
-// 外部の Nihon.json を非同期で取得
 async function loadNihonDatabase() {
 try {
 const response = await fetch('Nihon.json');
 if (!response.ok) throw new Error('Failed to load Nihon.json');
 const rawData = await response.json();
-// 配列の1番目の要素（都道府県別のオブジェクト）を展開
 const prefectures = rawData[0];
 Object.assign(nihonDatabase, prefectures);
-console.log("Successfully loaded Nihon.json database:", Object.keys(nihonDatabase).length, "prefectures.");
-showToast("全国市町村データベースをロードしました");
+console.log("Loaded Prefs:", Object.keys(nihonDatabase).length);
 } catch (e) {
-console.error("Nihon.json load failed. Using emergency mock:", e);
-// 読み込めなかった場合の最小限のエマージェンシーフォールバック
+console.warn("Fallback to minimal emergency mock", e);
 nihonDatabase["08"] = {
 name: "茨城県",
 city: [
@@ -759,11 +768,9 @@ city: [
 };
 }
 }
-// 指定した都道府県名の踏破数を計算
 function countVisitedInPref(state, prefName) {
 let count = 0;
 state.visitedCities.forEach(cityName => {
-// nihonDatabaseを走査して合致する都道府県を特定
 for (const key in nihonDatabase) {
 if (nihonDatabase[key].name === prefName) {
 const hasCity = nihonDatabase[key].city.some(c => c.city === cityName);
@@ -773,7 +780,6 @@ if (hasCity) count++;
 });
 return count;
 }
-// 訪問した都道府県数を計算
 function countUniquePrefectures(state) {
 const visitedPrefs = new Set();
 state.visitedCities.forEach(cityName => {
@@ -786,7 +792,6 @@ visitedPrefs.add(nihonDatabase[key].name);
 });
 return visitedPrefs.size;
 }
-// 市町村全体の総数を計算
 function getTotalCitiesCount() {
 let total = 0;
 for (const key in nihonDatabase) {
@@ -794,9 +799,7 @@ total += nihonDatabase[key].city.length;
 }
 return total;
 }
-// 初期化ロード
 window.addEventListener('DOMContentLoaded', async () => {
-// 地図描画の前に全国データを非同期ロード
 await loadNihonDatabase();
 map = L.map('map', {
 zoomControl: false,
@@ -914,7 +917,6 @@ simStep = 0;
 }, 4000);
 }
 }
-// GPS（またはシミュレーション）から位置座標を受け取ったときの処理
 async function handleNewLocation(lat, lng) {
 const currentLatLng = L.latLng(lat, lng);
 map.setView(currentLatLng, 12);
@@ -927,28 +929,22 @@ document.getElementById('overlay-dist-text').innerText = ⁠今日の移動: ${a
 }
 appState.activeRoute.push([lat, lng]);
 activePathPolyline.setLatLngs(appState.activeRoute);
-// 【リバースジオコーディングAPI (Nominatim) の呼び出し】
-// 緯度経度から無料APIを使って現在地の住所情報を非同期で取得します
 try {
 const response = await fetch(⁠https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1⁠, {
-headers: { 'Accept-Language': 'ja' } // 日本語住所の指定
+headers: { 'Accept-Language': 'ja' }
 });
-if (!response.ok) throw new Error('Nominatim connection failed');
+if (!response.ok) throw new Error('Nominatim failed');
 const geoData = await response.json();
 const address = geoData.address;
-// 住所項目から都道府県と市町村名を取得
-// Nominatimは住所階層に応じて province/state に都道府県、city/town/suburb/county に市区町村が入ります
 const detectedPref = address.province || address.state || "";
 const detectedCity = address.city || address.town || address.suburb || address.county || "";
 if (detectedPref && detectedCity) {
-// アップロードされた Nihon.json データベースの中に実在するか照合
 let verifiedCityName = null;
 for (const key in nihonDatabase) {
 if (nihonDatabase[key].name === detectedPref) {
-// 部分一致、または完全一致で検索
 const matched = nihonDatabase[key].city.find(c => c.city.includes(detectedCity) || detectedCity.includes(c.city));
 if (matched) {
-verifiedCityName = matched.city; // 正式な市町村名を取得
+verifiedCityName = matched.city;
 }
 }
 }
@@ -964,14 +960,12 @@ document.getElementById('overlay-city-text').innerText = ⁠現在地: ${detecte
 }
 }
 } catch (error) {
-console.warn("Reverse Geocoding failed:", error);
-// APIに繋がらない・失敗した時のローカルフォールバック判定
+console.warn("Geocoding failed:", error);
 fallbackEmergencyLocationCheck(lat, lng);
 }
 updateProfileStats();
 checkBadgeCompletion();
 }
-// オフライン・失敗時の緊急判定用ロジック (既存の主要12自治体)
 function fallbackEmergencyLocationCheck(lat, lng) {
 const emergencyCities = {
 "35.6895,139.6917": "新宿区",
@@ -999,10 +993,9 @@ appState.visitedCities.add(nearestCity);
 showToast(⁠緊急踏破判定: ${nearestCity}！⁠, "fa-shield");
 triggerDatabasePush();
 }
-document.getElementById('overlay-city-text').innerText = ⁠現在地: 茨城県 / 東京都 (オフライン判定): ${nearestCity}⁠;
+document.getElementById('overlay-city-text').innerText = ⁠現在地 (オフライン判定): ${nearestCity}⁠;
 }
 }
-// --- カテゴリフィルター ---
 function filterBadges(category) {
 appState.currentCategory = category;
 const tabs = document.querySelectorAll('.badge-tab');
@@ -1024,7 +1017,6 @@ case 'special': return '特別実績';
 default: return 'すべて';
 }
 }
-// --- 実績の描画システム ---
 function renderBadges() {
 const grid = document.getElementById('badge-grid');
 grid.innerHTML = "";
@@ -1124,7 +1116,7 @@ function updateProfileStats() {
 const visitedCnt = appState.visitedCities.size;
 let unlockedCount = Object.keys(appState.unlockedBadges).length;
 document.getElementById('profile-total-dist').innerText = ⁠${appState.totalDistance.toFixed(1)} km⁠;
-const totalCountInDb = getTotalCitiesCount() || 1800; // 日本全国の総市区町村数
+const totalCountInDb = getTotalCitiesCount() || 1800;
 document.getElementById('profile-visited-cnt').innerText = ⁠${visitedCnt} / ${totalCountInDb}⁠;
 document.getElementById('profile-badges-cnt').innerText = ⁠${unlockedCount} / ${appState.badges.length}⁠;
 let rank = "新米冒険者";
@@ -1137,11 +1129,16 @@ rank = "Lv.1 ビギナー冒険家";
 }
 document.getElementById('profile-rank').innerText = rank;
 }
+// 非同期でのバグ（未定義エラーによる無限ループ）を完全に解消
 function setupFirestoreSync(uid) {
-const path = ⁠artifacts/${window.appId}/users/${uid}/userData/journeyState⁠;
 try {
-const { doc, onSnapshot } = window.firebaseFirestore || {};
-const docRef = window.firebaseFirestoreDocRef || doc(window.db, 'artifacts', window.appId, 'users', uid, 'journeyState');
+if (!window.firebaseDocs) {
+// まだFirebaseライブラリのロードが完了していない場合は1秒待ってリトライ
+setTimeout(() => setupFirestoreSync(uid), 1000);
+return;
+}
+const { doc, onSnapshot } = window.firebaseDocs;
+const docRef = doc(window.db, 'artifacts', window.appId, 'users', uid, 'journeyState');
 onSnapshot(docRef, (snapshot) => {
 if (snapshot.exists()) {
 const data = snapshot.data();
@@ -1168,15 +1165,15 @@ triggerDatabasePush();
 console.error("Firestore sync error", error);
 });
 } catch (e) {
-console.warn("Firestore sync setup delayed: wait on dynamic mount", e);
-setTimeout(() => setupFirestoreSync(uid), 1000);
+console.error("Error setting up Firestore Sync:", e);
 }
 }
 function triggerDatabasePush() {
 if (!window.user) return;
 const uid = window.user.uid;
 try {
-const { doc, setDoc } = window.firebaseFirestore || {};
+if (!window.firebaseDocs) return;
+const { doc, setDoc } = window.firebaseDocs;
 const docRef = doc(window.db, 'artifacts', window.appId, 'users', uid, 'journeyState');
 setDoc(docRef, {
 visitedCities: Array.from(appState.visitedCities),
