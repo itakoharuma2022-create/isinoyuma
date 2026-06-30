@@ -1,0 +1,1145 @@
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GeoJourney - 旅と実績のライフログWebアプリ</title>
+    
+    <!-- PWA用のマニフェスト（モバイルアプリのようにインストール可能にする設定） -->
+    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkdlb0pvdXJuZXkiLAogICJzaG9ydF9uYW1lIjogIkdlb0pvdXJuZXkiLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsCiAgImJhY2tncm91bmRfY29sb3IiOiAiIzA5MEIxMSIsCiAgInRoZW1lX2NvbG9yIjogIiMwMDdBRkYiCiB9">
+    
+    <!-- Leaflet.js (地図描画用ライブラリ) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- FontAwesome (高クオリティなシステムアイコン用) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    
+    <style>
+        :root {
+            --bg-dark: #090B11;
+            --bg-panel: #121622;
+            --primary: #007AFF;
+            --primary-glow: rgba(0, 122, 255, 0.4);
+            --accent: #00FFC2;
+            --accent-glow: rgba(0, 255, 194, 0.3);
+            --text-main: #F8F9FA;
+            --text-muted: #8E929E;
+            --border: rgba(255, 255, 255, 0.08);
+            --danger: #FF3B30;
+        }
+
+        /* 画面リセットとタッチ最適化（スマホのダブルタップズーム等を無効化） */
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+            -webkit-tap-highlight-color: transparent; 
+            touch-action: manipulation;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* アプリ本体の全体レイアウト */
+        #app {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            height: calc(100vh - 65px);
+        }
+
+        /* 各種タブごとの画面定義 */
+        .tab-panel {
+            display: none;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        .tab-panel.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ------------------ HOME (MAP SCREEN) ------------------ */
+        #map-container {
+            flex: 1;
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        /* 地図にオーバーレイするステータス＆コントロール表示 */
+        .map-overlay {
+            position: absolute;
+            z-index: 1000;
+            pointer-events: none;
+            width: 100%;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 100%;
+        }
+        .overlay-top {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: auto;
+            width: 100%;
+        }
+        .stat-badge {
+            background: rgba(18, 22, 34, 0.9);
+            border: 1px solid var(--border);
+            padding: 10px 16px;
+            border-radius: 24px;
+            font-size: 13px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        }
+        .stat-badge .left-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stat-badge i { color: var(--accent); }
+        .sync-indicator {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 8px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .sync-indicator.synced {
+            color: var(--accent);
+            background: rgba(0, 255, 194, 0.1);
+        }
+        
+        .overlay-bottom {
+            pointer-events: auto;
+            margin-top: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .control-panel {
+            background: rgba(18, 22, 34, 0.95);
+            border: 1px solid rgba(0, 122, 255, 0.3);
+            border-radius: 20px;
+            padding: 16px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .panel-title { font-size: 14px; font-weight: bold; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+        .pulse-dot {
+            width: 10px; height: 10px; background-color: var(--danger); border-radius: 50%;
+            animation: pulse-animation 1.5s infinite;
+        }
+        @keyframes pulse-animation {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.8); opacity: 0.5; }
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            flex: 1;
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+        .btn:active { transform: scale(0.97); opacity: 0.9; }
+        .btn-accent {
+            background: #1c1c1e;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            box-shadow: none;
+        }
+        .btn-accent.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 0 0 12px var(--accent-glow);
+        }
+
+        /* ------------------ COMMON SCROLLABLE CONTENT ------------------ */
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            padding-bottom: 40px;
+        }
+        .section-header {
+            margin-bottom: 24px;
+        }
+        .section-title {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
+        .section-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ------------------ ACHIEVEMENTS SCREEN ------------------ */
+        .stats-summary-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .progress-container {
+            margin-top: 15px;
+        }
+        .progress-bar-bg {
+            background: rgba(255, 255, 255, 0.08);
+            height: 10px;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .progress-bar-fill {
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            height: 100%;
+            width: 0%;
+            transition: width 1s cubic-bezier(0.1, 0.8, 0.3, 1);
+        }
+        .badge-list {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        .badge-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 20px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+        }
+        .badge-card.locked {
+            opacity: 0.4;
+        }
+        .badge-card.locked::after {
+            content: "\f023";
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        .badge-icon-wrapper {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.04);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            font-size: 26px;
+            color: var(--text-muted);
+            transition: all 0.3s;
+        }
+        .badge-card.unlocked .badge-icon-wrapper {
+            background: rgba(0, 255, 194, 0.12);
+            color: var(--accent);
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+        .badge-name { font-size: 14px; font-weight: 700; margin-bottom: 6px; color: var(--text-main); }
+        .badge-desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
+        /* ------------------ HISTORY SCREEN ------------------ */
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .history-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .history-card:active {
+            transform: scale(0.97);
+        }
+        .history-card.selected {
+            border-color: var(--primary);
+            box-shadow: 0 0 15px rgba(0, 122, 255, 0.25);
+            background: rgba(0, 122, 255, 0.05);
+        }
+        .history-info h4 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+        .history-info p { font-size: 13px; color: var(--text-muted); }
+        .history-stat {
+            text-align: right;
+        }
+        .history-dist { font-size: 18px; font-weight: bold; color: var(--primary); }
+        .history-cities-cnt { font-size: 11px; color: var(--accent); margin-top: 2px; font-weight: 600; }
+        .empty-history-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+        .empty-history-state i {
+            font-size: 48px;
+            margin-bottom: 16px;
+            color: rgba(255,255,255,0.05);
+        }
+
+        /* ------------------ PROFILE SCREEN ------------------ */
+        .profile-header-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 32px 20px;
+            text-align: center;
+            margin-bottom: 24px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .profile-avatar {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            margin: 0 auto 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 44px;
+            color: white;
+            box-shadow: 0 8px 24px rgba(0, 122, 255, 0.4);
+        }
+        .profile-name { font-size: 22px; font-weight: bold; }
+        .profile-title { font-size: 13px; color: var(--accent); font-weight: 700; margin-top: 6px; letter-spacing: 1px; text-transform: uppercase; }
+        
+        .profile-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        .profile-mini-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 16px;
+        }
+        .mini-card-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+        .mini-card-val { font-size: 22px; font-weight: 800; margin-top: 6px; }
+        .user-id-box {
+            grid-column: span 2;
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            word-break: break-all;
+            background: rgba(255,255,255,0.02);
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px dashed var(--border);
+        }
+
+        /* ------------------ BOTTOM NAVIGATION BAR ------------------ */
+        #nav-bar {
+            height: 65px;
+            background-color: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 2000;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            cursor: pointer;
+            width: 25%;
+            height: 100%;
+            transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .nav-item i {
+            font-size: 20px;
+            margin-bottom: 4px;
+            transition: transform 0.2s;
+        }
+        .nav-item span {
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .nav-item.active {
+            color: var(--primary);
+        }
+        .nav-item.active i {
+            transform: translateY(-2px);
+            color: var(--primary);
+        }
+
+        /* ------------------ NOTIFICATION BANNER (TOAST) ------------------ */
+        #toast {
+            position: absolute;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: rgba(18, 22, 34, 0.95);
+            border: 1px solid var(--accent);
+            padding: 12px 24px;
+            border-radius: 30px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 9999;
+            box-shadow: 0 10px 25px rgba(0, 255, 194, 0.2);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+            width: 90%;
+            max-width: 400px;
+            justify-content: center;
+        }
+        #toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+        #toast i { color: var(--accent); font-size: 18px; }
+        #toast span { font-weight: 700; font-size: 13px; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <!-- システムからのリアルタイム通知システム -->
+    <div id="toast">
+        <i class="fa-solid fa-circle-info" id="toast-icon"></i>
+        <span id="toast-message">クラウド同期を準備中...</span>
+    </div>
+
+    <!-- アプリのレイアウト骨格 -->
+    <div id="app">
+        
+        <!-- 1. ホーム画面 (Leaflet地図メイン) -->
+        <div id="home-tab" class="tab-panel active">
+            <div id="map-container">
+                <div class="map-overlay">
+                    <div class="overlay-top">
+                        <div class="stat-badge">
+                            <div class="left-info">
+                                <i class="fa-solid fa-mountain-city"></i>
+                                <span id="overlay-city-text">位置特定を準備中...</span>
+                            </div>
+                            <div class="sync-indicator" id="cloud-sync-badge">
+                                <i class="fa-solid fa-cloud"></i>
+                                <span id="sync-text">未接続</span>
+                            </div>
+                        </div>
+                        <div class="stat-badge">
+                            <div class="left-info">
+                                <i class="fa-solid fa-route"></i>
+                                <span id="overlay-dist-text">今日の移動: 0.0 km</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overlay-bottom">
+                        <div class="control-panel">
+                            <div class="panel-header">
+                                <span class="panel-title">位置追跡コントロール</span>
+                                <div class="pulse-dot" id="active-pulse" style="display:none;"></div>
+                            </div>
+                            <div class="btn-group">
+                                <button class="btn" id="start-track-btn" onclick="toggleTracking()">
+                                    <i class="fa-solid fa-location-arrow"></i>
+                                    <span>追跡開始 (GPS)</span>
+                                </button>
+                                <button class="btn btn-accent" id="sim-btn" onclick="toggleSimulation()">
+                                    <i class="fa-solid fa-play"></i>
+                                    <span>シミュレート走行</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="map"></div>
+            </div>
+        </div>
+
+        <!-- 2. 実績一覧画面 -->
+        <div id="achieve-tab" class="tab-panel">
+            <div class="panel-content">
+                <div class="section-header">
+                    <h2 class="section-title">Achievements</h2>
+                    <p class="section-desc">旅の記録に基づいて、リアルタイムにバッジがアンロックされます</p>
+                </div>
+
+                <div class="stats-summary-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:14px; font-weight:600; color:var(--text-muted);">全国制覇率</span>
+                        <strong id="achieve-ratio-text" style="color: var(--accent); font-size:16px;">0 / 12 (0%)</strong>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="achieve-progress"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 style="font-size:15px; font-weight:700; margin-bottom:16px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">コレクション</h3>
+                <div class="badge-list" id="badge-grid">
+                    <!-- JavaScriptでカードが自動生成されます -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 移動履歴画面 -->
+        <div id="history-tab" class="tab-panel">
+            <div class="panel-content">
+                <div class="section-header">
+                    <h2 class="section-title">Travel Logs</h2>
+                    <p class="section-desc">これまでの移動の軌跡をいつでもマップ上に復元できます</p>
+                </div>
+                <div class="history-list" id="history-list-container">
+                    <!-- JavaScriptで履歴アイテムが自動生成されます -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. プロフィール/設定画面 -->
+        <div id="profile-tab" class="tab-panel">
+            <div class="panel-content">
+                <div class="section-header">
+                    <h2 class="section-title">Explorer</h2>
+                    <p class="section-desc">旅の統計データと同期アカウント情報</p>
+                </div>
+
+                <div class="profile-header-card">
+                    <div class="profile-avatar">
+                        <i class="fa-solid fa-crown"></i>
+                    </div>
+                    <h3 class="profile-name">旅人エクスプローラー</h3>
+                    <div class="profile-title" id="profile-rank">Lv.1 ビギナー</div>
+                </div>
+
+                <div class="profile-grid">
+                    <div class="profile-mini-card">
+                        <span class="mini-card-label">累計移動距離</span>
+                        <div class="mini-card-val" id="profile-total-dist">0.0 km</div>
+                    </div>
+                    <div class="profile-mini-card">
+                        <span class="mini-card-label">訪問自治体数</span>
+                        <div class="mini-card-val" id="profile-visited-cnt">0 / 12</div>
+                    </div>
+                    <div class="profile-mini-card">
+                        <span class="mini-card-label">解除実績バッジ</span>
+                        <div class="mini-card-val" id="profile-badges-cnt">0 / 4</div>
+                    </div>
+                    <div class="profile-mini-card">
+                        <span class="mini-card-label">同期状態</span>
+                        <div class="mini-card-val" id="profile-sync-state" style="color:var(--accent); font-size:16px; margin-top:10px;">オンライン</div>
+                    </div>
+                    <div class="user-id-box">
+                        UID: <span id="user-uid-text">認証中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 下部ナビゲーション -->
+    <nav id="nav-bar">
+        <div class="nav-item active" onclick="switchTab('home-tab')">
+            <i class="fa-solid fa-map"></i>
+            <span>マップ</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('achieve-tab')">
+            <i class="fa-solid fa-trophy"></i>
+            <span>実績</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('history-tab')">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+            <span>履歴</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('profile-tab')">
+            <i class="fa-solid fa-user-astronaut"></i>
+            <span>プロフ</span>
+        </div>
+    </nav>
+
+    <!-- ==================== Firebase SDK & クラウドデータベース設定 ==================== -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebaseの設定オブジェクト(環境から渡された設定を使用、未定義時はフォールバック)
+        let firebaseConfig = {};
+        if (typeof __firebase_config !== 'undefined') {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } else {
+            // ローカル/デモ用のダミー設定
+            firebaseConfig = {
+                apiKey: "demo-api-key",
+                authDomain: "demo-app.firebaseapp.com",
+                projectId: "demo-app",
+                storageBucket: "demo-app.appspot.com",
+                messagingSenderId: "123456789",
+                appId: "1:123:web:123"
+            };
+        }
+
+        // Firebase初期化
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'geojourney-app-v1';
+
+        // 状態保持用のオブジェクト
+        window.user = null;
+        window.db = db;
+        window.appId = appId;
+
+        // --- 起動時に自動匿名サインインでアカウントを確保 ---
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Authentication Error", err);
+                showToast("オフラインまたはダミーモードで起動します");
+                // オフライン用のモック認証処理
+                setupMockAuth();
+            }
+        };
+
+        // サインイン完了時のリスナー
+        onAuthStateChanged(auth, (currentUser) => {
+            if (currentUser) {
+                window.user = currentUser;
+                document.getElementById('user-uid-text').innerText = currentUser.uid;
+                document.getElementById('cloud-sync-badge').classList.add('synced');
+                document.getElementById('sync-text').innerText = "同期中";
+                document.getElementById('profile-sync-state').innerText = "リアルタイム同期";
+                
+                showToast("データベースとのリアルタイム同期を確立しました");
+                
+                // Firestoreからユーザーデータを初期ロード＆監視開始
+                setupFirestoreSync(currentUser.uid);
+            }
+        });
+
+        function setupMockAuth() {
+            const mockUid = "offline-user-" + Math.floor(Math.random() * 100000);
+            window.user = { uid: mockUid };
+            document.getElementById('user-uid-text').innerText = mockUid;
+            document.getElementById('sync-text').innerText = "ローカル保存中";
+            document.getElementById('profile-sync-state').innerText = "ローカル（オフライン）";
+        }
+
+        // 起動
+        initAuth();
+    </script>
+
+    <!-- ==================== アプリケーションコアロジック ==================== -->
+    <script>
+        // --- データ定義＆実在する自治体データベース ---
+        const cityDatabase = {
+            "35.6895,139.6917": { name: "東京都新宿区", pref: "東京都" },
+            "35.6640,139.6980": { name: "東京都渋谷区", pref: "東京都" },
+            "35.6586,139.7454": { name: "東京都港区", pref: "東京都" },
+            "35.4437,139.6380": { name: "神奈川県横浜市中区", pref: "神奈川県" },
+            "35.3191,139.5467": { name: "神奈川県鎌倉市", pref: "神奈川県" },
+            "35.1167,139.1500": { name: "神奈川県小田原市", pref: "神奈川県" },
+            "35.0594,139.0736": { name: "静岡県熱海市", pref: "静岡県" },
+            "34.9756,138.3828": { name: "静岡県静岡市", pref: "静岡県" },
+            "35.9128,139.4833": { name: "埼玉県川越市", pref: "埼玉県" },
+            "36.3659,140.4711": { name: "茨城県水戸市", pref: "茨城県" },
+            "36.3219,140.6191": { name: "茨城県ひたちなか市", pref: "茨城県" },
+            "35.9251,140.6384": { name: "茨城県鹿嶋市", pref: "茨城県" }
+        };
+
+        const appState = {
+            visitedCities: new Set(),
+            totalDistance: 0.0,
+            activeRoute: [],
+            isTracking: false,
+            isSimulating: false,
+            unlockedBadges: [],
+            selectedHistoryId: null,
+            history: [],
+            badges: [
+                { id: "badge_first_step", name: "最初の第一歩", desc: "1つの市区町村を訪問する", condition: (state) => state.visitedCities.size >= 1, icon: "fa-map-pin" },
+                { id: "badge_three_cities", name: "トリプル探検家", desc: "3つ以上の市区町村を訪問する", condition: (state) => state.visitedCities.size >= 3, icon: "fa-mountain-city" },
+                { id: "badge_half_dozen", name: "エリア開拓者", desc: "6つ以上の市区町村を訪問する", condition: (state) => state.visitedCities.size >= 6, icon: "fa-route" },
+                { id: "badge_marathon", name: "旅は続く", desc: "累計移動距離が10.0kmを超える", condition: (state) => state.totalDistance >= 10.0, icon: "fa-person-running" }
+            ]
+        };
+
+        // デモ用ルートデータ (鹿嶋市周辺)
+        const simulationRoute = [
+            [35.9251, 140.6384], // 鹿嶋市
+            [36.3219, 140.6191], // ひたちなか市
+            [36.3659, 140.4711], // 水戸市
+        ];
+
+        let map;
+        let activePathPolyline;
+        let historyPathPolyline;
+        let currentMarker;
+        let simInterval = null;
+        let simStep = 0;
+        let watchId = null;
+
+        // --- 地図の初期セットアップ ---
+        window.addEventListener('DOMContentLoaded', () => {
+            // 初期表示は茨城県鹿嶋市付近
+            map = L.map('map', {
+                zoomControl: false,
+                maxZoom: 18,
+                minZoom: 5
+            }).setView([35.9251, 140.6384], 10);
+
+            // ダークカラーに統一された美しいマップレイヤー
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            }).addTo(map);
+
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // 各種描画オブジェクトの初期化
+            activePathPolyline = L.polyline([], {color: '#007AFF', weight: 6, opacity: 0.95}).addTo(map);
+            historyPathPolyline = L.polyline([], {color: '#00FFC2', weight: 5, opacity: 0.8, dashArray: '5, 10'}).addTo(map);
+
+            currentMarker = L.circleMarker([35.9251, 140.6384], {
+                radius: 10,
+                color: '#007AFF',
+                fillColor: '#00FFC2',
+                fillOpacity: 0.8
+            }).addTo(map);
+
+            renderBadges();
+            renderHistoryList();
+            updateProfileStats();
+        });
+
+        // --- タブ遷移ロジック ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+
+            document.getElementById(tabId).classList.add('active');
+            
+            const tabs = ['home-tab', 'achieve-tab', 'history-tab', 'profile-tab'];
+            const targetIdx = tabs.indexOf(tabId);
+            document.querySelectorAll('.nav-item')[targetIdx].classList.add('active');
+
+            if (tabId === 'home-tab' && map) {
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 100);
+            }
+        }
+
+        // --- トースト通知 ---
+        function showToast(message, iconClass = "fa-circle-info") {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toast-icon');
+            
+            icon.className = `fa-solid ${iconClass}`;
+            document.getElementById('toast-message').innerText = message;
+            
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3500);
+        }
+
+        // --- GPSリアルタイムトラッキング ---
+        function toggleTracking() {
+            const btn = document.getElementById('start-track-btn');
+            const pulse = document.getElementById('active-pulse');
+
+            if (appState.isTracking) {
+                if (watchId !== null) {
+                    navigator.geolocation.clearWatch(watchId);
+                    watchId = null;
+                }
+                appState.isTracking = false;
+                btn.classList.remove('btn-accent');
+                btn.innerHTML = '<i class="fa-solid fa-location-arrow"></i><span>追跡開始 (GPS)</span>';
+                pulse.style.display = 'none';
+                showToast("GPSアクティビティを一時停止しました");
+                
+                // 今回の移動距離をセーブ
+                saveActiveRouteToHistory();
+            } else {
+                if (!navigator.geolocation) {
+                    showToast("GPS機能を使用できませんでした");
+                    return;
+                }
+                if (appState.isSimulating) toggleSimulation();
+
+                appState.isTracking = true;
+                btn.classList.add('btn-accent');
+                btn.innerHTML = '<i class="fa-solid fa-pause"></i><span>追跡を停止</span>';
+                pulse.style.display = 'block';
+
+                watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        handleNewLocation(position.coords.latitude, position.coords.longitude);
+                    },
+                    (error) => {
+                        showToast("GPSシグナルを探しています...", "fa-triangle-exclamation");
+                    },
+                    { enableHighAccuracy: true, maximumAge: 5000 }
+                );
+            }
+        }
+
+        // --- 移動デモシミュレータ ---
+        function toggleSimulation() {
+            const btn = document.getElementById('sim-btn');
+            if (appState.isSimulating) {
+                clearInterval(simInterval);
+                simInterval = null;
+                appState.isSimulating = false;
+                btn.classList.remove('active');
+                btn.innerHTML = '<i class="fa-solid fa-play"></i><span>シミュレート走行</span>';
+                showToast("シミュレーションを中断しました");
+            } else {
+                if (appState.isTracking) toggleTracking();
+
+                appState.isSimulating = true;
+                btn.classList.add('active');
+                btn.innerHTML = '<i class="fa-solid fa-pause"></i><span>一時停止</span>';
+                showToast("移動シミュレーションを開始します！");
+
+                simInterval = setInterval(() => {
+                    if (simStep < simulationRoute.length) {
+                        const pt = simulationRoute[simStep];
+                        handleNewLocation(pt[0], pt[1]);
+                        simStep++;
+                    } else {
+                        clearInterval(simInterval);
+                        simInterval = null;
+                        appState.isSimulating = false;
+                        btn.classList.remove('active');
+                        btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i><span>再スタート</span>';
+                        showToast("シミュレーションが完了しました！");
+                        
+                        saveActiveRouteToHistory();
+                        simStep = 0;
+                    }
+                }, 4000);
+            }
+        }
+
+        // --- 地理位置処理・踏破検知 ---
+        function handleNewLocation(lat, lng) {
+            const currentLatLng = L.latLng(lat, lng);
+            
+            map.setView(currentLatLng, 12);
+            currentMarker.setLatLng(currentLatLng);
+
+            if (appState.activeRoute.length > 0) {
+                const prevLatLng = L.latLng(appState.activeRoute[appState.activeRoute.length - 1]);
+                const distDiff = prevLatLng.distanceTo(currentLatLng) / 1000;
+                appState.totalDistance += Number(distDiff.toFixed(2));
+                document.getElementById('overlay-dist-text').innerText = `今日の移動: ${appState.totalDistance.toFixed(1)} km`;
+            }
+
+            appState.activeRoute.push([lat, lng]);
+            activePathPolyline.setLatLngs(appState.activeRoute);
+
+            // 市町村データベースとの照合判定
+            let detectedCity = "千葉県周辺の海域"; 
+            let minDistance = Infinity;
+            for (const key in cityDatabase) {
+                const [dbLat, dbLng] = key.split(',').map(Number);
+                const dbLatLng = L.latLng(dbLat, dbLng);
+                const d = currentLatLng.distanceTo(dbLatLng);
+                if (d < minDistance && d < 15000) { // 半径15km以内を許容
+                    minDistance = d;
+                    detectedCity = cityDatabase[key].name;
+                }
+            }
+
+            // 初回訪問の処理
+            if (detectedCity && !appState.visitedCities.has(detectedCity)) {
+                appState.visitedCities.add(detectedCity);
+                showToast(`実績判定: ${detectedCity} を初めて制覇しました！`, "fa-medal");
+                triggerDatabasePush();
+            }
+
+            document.getElementById('overlay-city-text').innerText = `現在地: ${detectedCity}`;
+            updateProfileStats();
+            checkBadgeCompletion();
+        }
+
+        // --- 実績バッジシステム ---
+        function renderBadges() {
+            const grid = document.getElementById('badge-grid');
+            grid.innerHTML = "";
+
+            appState.badges.forEach(badge => {
+                const isUnlocked = appState.unlockedBadges.includes(badge.id);
+                const card = document.createElement('div');
+                card.className = `badge-card ${isUnlocked ? 'unlocked' : 'locked'}`;
+                
+                card.innerHTML = `
+                    <div class="badge-icon-wrapper">
+                        <i class="fa-solid ${badge.icon}"></i>
+                    </div>
+                    <div class="badge-name">${badge.name}</div>
+                    <div class="badge-desc">${badge.desc}</div>
+                `;
+                grid.appendChild(card);
+            });
+
+            const total = appState.badges.length;
+            const unlockedCnt = appState.unlockedBadges.length;
+            const percent = total > 0 ? (unlockedCnt / total) * 100 : 0;
+            
+            document.getElementById('achieve-progress').style.width = `${percent}%`;
+            document.getElementById('achieve-ratio-text').innerText = `${unlockedCnt} / ${total} (${Math.round(percent)}%)`;
+        }
+
+        function checkBadgeCompletion() {
+            let changed = false;
+            appState.badges.forEach(badge => {
+                if (!appState.unlockedBadges.includes(badge.id)) {
+                    if (badge.condition(appState)) {
+                        appState.unlockedBadges.push(badge.id);
+                        showToast(`実績解除: 「${badge.name}」バッジを獲得しました！`, "fa-trophy");
+                        changed = true;
+                    }
+                }
+            });
+            if (changed) {
+                renderBadges();
+                updateProfileStats();
+                triggerDatabasePush();
+            }
+        }
+
+        // --- ログ保存とヒストリービュー ---
+        function renderHistoryList() {
+            const listContainer = document.getElementById('history-list-container');
+            listContainer.innerHTML = "";
+
+            if (appState.history.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="empty-history-state">
+                        <i class="fa-solid fa-map-location-dot"></i>
+                        <p>まだ保存された移動履歴がありません</p>
+                    </div>
+                `;
+                return;
+            }
+
+            appState.history.forEach(item => {
+                const card = document.createElement('div');
+                card.className = `history-card ${appState.selectedHistoryId === item.id ? 'selected' : ''}`;
+                card.onclick = () => selectHistory(item);
+
+                card.innerHTML = `
+                    <div class="history-info">
+                        <h4>${item.date}</h4>
+                        <p>${item.cities.join(' ➔ ')}</p>
+                    </div>
+                    <div class="history-stat">
+                        <div class="history-dist">${item.distance} km</div>
+                        <div class="history-cities-cnt">${item.cities.length} 市町村</div>
+                    </div>
+                `;
+                listContainer.appendChild(card);
+            });
+        }
+
+        function selectHistory(item) {
+            if (appState.selectedHistoryId === item.id) {
+                appState.selectedHistoryId = null;
+                historyPathPolyline.setLatLngs([]);
+                showToast("移動ログ表示をクリアしました");
+            } else {
+                appState.selectedHistoryId = item.id;
+                historyPathPolyline.setLatLngs(item.route);
+                map.fitBounds(historyPathPolyline.getBounds(), { padding: [50, 50] });
+                showToast(`${item.date} の踏破ルートを再構築しました`);
+            }
+            renderHistoryList();
+            switchTab('home-tab');
+        }
+
+        function saveActiveRouteToHistory() {
+            if (appState.activeRoute.length === 0) return;
+            
+            const today = new Date();
+            const dateStr = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+            const uniqueCities = Array.from(appState.visitedCities);
+
+            const newHist = {
+                id: "hist_" + Date.now(),
+                date: dateStr,
+                route: [...appState.activeRoute],
+                cities: uniqueCities.length > 0 ? uniqueCities.slice(-3) : ["茨城県鹿嶋市"],
+                distance: parseFloat(appState.totalDistance.toFixed(1))
+            };
+
+            appState.history.unshift(newHist);
+            appState.activeRoute = [];
+            activePathPolyline.setLatLngs([]);
+            
+            renderHistoryList();
+            updateProfileStats();
+            triggerDatabasePush();
+        }
+
+        // --- プロフィール画面のステータス更新 ---
+        function updateProfileStats() {
+            const visitedCnt = appState.visitedCities.size;
+
+            document.getElementById('profile-total-dist').innerText = `${appState.totalDistance.toFixed(1)} km`;
+            document.getElementById('profile-visited-cnt').innerText = `${visitedCnt} / 12`;
+            document.getElementById('profile-badges-cnt').innerText = `${appState.unlockedBadges.length} / ${appState.badges.length}`;
+
+            let rank = "新米冒険者";
+            if (visitedCnt >= 6) {
+                rank = "Lv.3 ベテラントラベラー";
+            } else if (visitedCnt >= 3) {
+                rank = "Lv.2 中堅エクスプローラー";
+            } else {
+                rank = "Lv.1 ビギナー冒険家";
+            }
+            document.getElementById('profile-rank').innerText = rank;
+        }
+
+        // --- Firebase バックエンドとの統合同期ロジック ---
+        function setupFirestoreSync(uid) {
+            // Firestoreからデータをオンデマンド＆リアルタイムで受信
+            const path = `artifacts/${window.appId}/users/${uid}/userData/journeyState`;
+            
+            try {
+                const { doc, onSnapshot } = window.firebaseFirestore || {};
+                const docRef = window.firebaseFirestoreDocRef || doc(window.db, 'artifacts', window.appId, 'users', uid, 'journeyState');
+                
+                onSnapshot(docRef, (snapshot) => {
+                    if (snapshot.exists()) {
+                        const data = snapshot.data();
+                        
+                        if (data.visitedCities) appState.visitedCities = new Set(data.visitedCities);
+                        if (data.totalDistance) appState.totalDistance = data.totalDistance;
+                        if (data.unlockedBadges) appState.unlockedBadges = data.unlockedBadges;
+                        if (data.history) appState.history = data.history;
+                        
+                        renderBadges();
+                        renderHistoryList();
+                        updateProfileStats();
+                    } else {
+                        triggerDatabasePush();
+                    }
+                }, (error) => {
+                    console.error("Firestore sync error", error);
+                });
+            } catch (e) {
+                console.warn("Firestore sync setup delayed: wait on dynamic mount", e);
+                setTimeout(() => setupFirestoreSync(uid), 1000);
+            }
+        }
+
+        function triggerDatabasePush() {
+            if (!window.user) return;
+            const uid = window.user.uid;
+            
+            try {
+                const { doc, setDoc } = window.firebaseFirestore || {};
+                const docRef = doc(window.db, 'artifacts', window.appId, 'users', uid, 'journeyState');
+                
+                setDoc(docRef, {
+                    visitedCities: Array.from(appState.visitedCities),
+                    totalDistance: appState.totalDistance,
+                    unlockedBadges: appState.unlockedBadges,
+                    history: appState.history,
+                    lastUpdated: new Date().toISOString()
+                }, { merge: true }).then(() => {
+                    console.log("Cloud synced successfully.");
+                }).catch(err => {
+                    console.error("Cloud sync failed", err);
+                });
+            } catch (e) {
+                localStorage.setItem(`geojourney_backup_${uid}`, JSON.stringify({
+                    visitedCities: Array.from(appState.visitedCities),
+                    totalDistance: appState.totalDistance,
+                    unlockedBadges: appState.unlockedBadges,
+                    history: appState.history
+                }));
+            }
+        }
+
+        window.setupFirestoreSync = setupFirestoreSync;
+        window.triggerDatabasePush = triggerDatabasePush;
+    </script>
+</body>
+</html>
+
+```
